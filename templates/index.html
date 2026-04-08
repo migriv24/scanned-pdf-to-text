@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF → Text</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    #drop-zone.drag-over { @apply border-blue-400 bg-blue-50; }
+    #output { white-space: pre-wrap; }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-950 text-gray-100 flex flex-col items-center py-12 px-4">
+
+  <div class="w-full max-w-3xl space-y-6">
+
+    <!-- Header -->
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight">PDF → Text</h1>
+      <p class="text-gray-400 mt-1 text-sm">Scanned book? No problem — each page is OCR'd and returned as plain text.</p>
+    </div>
+
+    <!-- Drop zone -->
+    <div
+      id="drop-zone"
+      class="border-2 border-dashed border-gray-700 rounded-xl p-10 text-center cursor-pointer transition hover:border-blue-500 hover:bg-gray-900"
+      onclick="document.getElementById('file-input').click()"
+    >
+      <svg class="mx-auto mb-3 w-10 h-10 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M12 16v-8m0 0-3 3m3-3 3 3M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+      </svg>
+      <p class="text-gray-300 font-medium">Drop your PDF here, or <span class="text-blue-400 underline">browse</span></p>
+      <p class="text-gray-500 text-xs mt-1">Up to 300 MB</p>
+      <input id="file-input" type="file" accept=".pdf" class="hidden" />
+    </div>
+
+    <!-- Selected file + convert button -->
+    <div id="file-info" class="hidden flex items-center justify-between bg-gray-900 rounded-lg px-4 py-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <svg class="w-5 h-5 text-red-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd"
+            d="M4 3a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7l-4-4H4zm2 9a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1-4a1 1 0 000 2h4a1 1 0 100-2H7z"
+            clip-rule="evenodd" />
+        </svg>
+        <span id="file-name" class="text-sm truncate text-gray-200"></span>
+      </div>
+      <button
+        id="convert-btn"
+        class="ml-4 shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-1.5 rounded-md text-sm font-medium transition"
+      >
+        Convert
+      </button>
+    </div>
+
+    <!-- Progress -->
+    <div id="progress-section" class="hidden space-y-2">
+      <div class="flex justify-between text-xs text-gray-400">
+        <span id="progress-label">Starting…</span>
+        <span id="progress-count"></span>
+      </div>
+      <div class="w-full bg-gray-800 rounded-full h-2">
+        <div id="progress-bar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="error-box" class="hidden bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-4 py-3 text-sm"></div>
+
+    <!-- Output -->
+    <div id="output-section" class="hidden space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold text-gray-200">Extracted Text</h2>
+        <div class="flex gap-2">
+          <button id="copy-btn"
+            class="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-md transition">
+            Copy
+          </button>
+          <button id="download-btn"
+            class="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-md transition">
+            Download .txt
+          </button>
+        </div>
+      </div>
+      <textarea
+        id="output"
+        class="w-full h-96 bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm text-gray-200 resize-y focus:outline-none focus:border-blue-500"
+        readonly
+        placeholder="Text will appear here as each page is processed…"
+      ></textarea>
+    </div>
+
+  </div>
+
+  <script>
+    const dropZone   = document.getElementById('drop-zone');
+    const fileInput  = document.getElementById('file-input');
+    const fileInfo   = document.getElementById('file-info');
+    const fileName   = document.getElementById('file-name');
+    const convertBtn = document.getElementById('convert-btn');
+    const progressSection = document.getElementById('progress-section');
+    const progressBar     = document.getElementById('progress-bar');
+    const progressLabel   = document.getElementById('progress-label');
+    const progressCount   = document.getElementById('progress-count');
+    const errorBox        = document.getElementById('error-box');
+    const outputSection   = document.getElementById('output-section');
+    const output          = document.getElementById('output');
+    const copyBtn         = document.getElementById('copy-btn');
+    const downloadBtn     = document.getElementById('download-btn');
+
+    let selectedFile = null;
+    let outputFilename = 'output.txt';
+
+    // --- Drag & drop ---
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-gray-900'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500', 'bg-gray-900'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-500', 'bg-gray-900');
+      const file = e.dataTransfer.files[0];
+      if (file) setFile(file);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+
+    function setFile(file) {
+      selectedFile = file;
+      fileName.textContent = file.name;
+      fileInfo.classList.remove('hidden');
+      errorBox.classList.add('hidden');
+      outputSection.classList.add('hidden');
+      progressSection.classList.add('hidden');
+      output.value = '';
+    }
+
+    // --- Convert ---
+    convertBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+
+      convertBtn.disabled = true;
+      errorBox.classList.add('hidden');
+      progressSection.classList.remove('hidden');
+      outputSection.classList.remove('hidden');
+      output.value = '';
+      progressBar.style.width = '0%';
+      progressLabel.textContent = 'Starting…';
+      progressCount.textContent = '';
+
+      const formData = new FormData();
+      formData.append('pdf', selectedFile);
+
+      try {
+        const response = await fetch('/convert', { method: 'POST', body: formData });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            let event;
+            try { event = JSON.parse(line.slice(6)); } catch { continue; }
+            handleEvent(event);
+          }
+        }
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        convertBtn.disabled = false;
+      }
+    });
+
+    function handleEvent(event) {
+      switch (event.type) {
+        case 'status':
+          progressLabel.textContent = event.message;
+          break;
+
+        case 'total':
+          progressLabel.textContent = `Processing page 0 of ${event.total}…`;
+          break;
+
+        case 'progress':
+          progressLabel.textContent = `Processing page ${event.page} of ${event.total}…`;
+          progressCount.textContent = `${event.page} / ${event.total}`;
+          progressBar.style.width = `${Math.round((event.page - 1) / event.total * 100)}%`;
+          break;
+
+        case 'page':
+          output.value += (output.value ? '\n\n' : '') + event.text;
+          output.scrollTop = output.scrollHeight;
+          progressBar.style.width = `${Math.round(event.page / parseInt(progressCount.textContent.split('/')[1]) * 100)}%`;
+          break;
+
+        case 'done':
+          outputFilename = event.filename;
+          progressLabel.textContent = 'Done!';
+          progressBar.style.width = '100%';
+          progressCount.textContent = '';
+          break;
+
+        case 'error':
+          showError(event.message);
+          break;
+      }
+    }
+
+    function showError(msg) {
+      errorBox.textContent = 'Error: ' + msg;
+      errorBox.classList.remove('hidden');
+      progressSection.classList.add('hidden');
+    }
+
+    // --- Copy ---
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(output.value).then(() => {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => copyBtn.textContent = 'Copy', 2000);
+      });
+    });
+
+    // --- Download ---
+    downloadBtn.addEventListener('click', () => {
+      const blob = new Blob([output.value], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = outputFilename;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
