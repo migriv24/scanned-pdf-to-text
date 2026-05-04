@@ -18,7 +18,7 @@
     <!-- Header -->
     <div>
       <h1 class="text-3xl font-bold tracking-tight">PDF → Text</h1>
-      <p class="text-gray-400 mt-1 text-sm">Scanned book? No problem — each page is OCR'd and returned as plain text.</p>
+      <p class="text-gray-400 mt-1 text-sm">Scanned book? Drop it in — rotation, multi-page spreads, and figures are detected automatically.</p>
     </div>
 
     <!-- Drop zone -->
@@ -134,6 +134,7 @@
       outputSection.classList.add('hidden');
       progressSection.classList.add('hidden');
       output.value = '';
+      document.title = 'PDF → Text';
     }
 
     // --- Convert ---
@@ -190,23 +191,31 @@
           progressLabel.textContent = `Processing page 0 of ${event.total}…`;
           break;
 
-        case 'progress':
+        case 'progress': {
+          const pct = Math.round((event.page - 1) / event.total * 100);
           progressLabel.textContent = `Processing page ${event.page} of ${event.total}…`;
           progressCount.textContent = `${event.page} / ${event.total}`;
-          progressBar.style.width = `${Math.round((event.page - 1) / event.total * 100)}%`;
+          progressBar.style.width = `${pct}%`;
+          document.title = `${pct}% — PDF → Text`;
           break;
+        }
 
-        case 'page':
+        case 'page': {
           output.value += (output.value ? '\n\n' : '') + event.text;
           output.scrollTop = output.scrollHeight;
-          progressBar.style.width = `${Math.round(event.page / parseInt(progressCount.textContent.split('/')[1]) * 100)}%`;
+          const total = parseInt(progressCount.textContent.split('/')[1]);
+          const pagePct = Math.round(event.page / total * 100);
+          progressBar.style.width = `${pagePct}%`;
+          document.title = `${pagePct}% — PDF → Text`;
           break;
+        }
 
         case 'done':
           outputFilename = event.filename;
           progressLabel.textContent = 'Done!';
           progressBar.style.width = '100%';
           progressCount.textContent = '';
+          document.title = 'Done! — PDF → Text';
           break;
 
         case 'error':
@@ -219,6 +228,7 @@
       errorBox.textContent = 'Error: ' + msg;
       errorBox.classList.remove('hidden');
       progressSection.classList.add('hidden');
+      document.title = 'PDF → Text';
     }
 
     // --- Copy ---

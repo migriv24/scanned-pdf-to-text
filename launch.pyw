@@ -49,6 +49,8 @@ def _fatal(msg: str):
 try:
     os.chdir(BASE)
     sys.path.insert(0, str(BASE))
+    # Suppress duplicate-OpenMP warning that occurs when NumPy and PyTorch share a process
+    os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
     def _server_running() -> bool:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
