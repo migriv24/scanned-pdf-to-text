@@ -1,6 +1,6 @@
 # create_shortcut.ps1
-# Run once to create (or re-create) the Desktop shortcut for PDF to Text.
-# Usage: right-click, Run with PowerShell
+# Run once (after setup_env.ps1 + download_models.py) to create the Desktop shortcut.
+# Usage: right-click -> Run with PowerShell
 #        (or: powershell -ExecutionPolicy Bypass -File create_shortcut.ps1)
 
 $ProjectDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -11,47 +11,84 @@ $ShortcutPath = [System.IO.Path]::Combine(
     "PDF to Text.lnk"
 )
 
-# Find pythonw.exe — try each candidate in order, pick the first one that
-# exists AND has all required packages installed.
-# PY312_SAM3 is the preferred env: Python 3.12, PyTorch 2.11+CUDA 12.6, SAM3 + all deps.
-# PY310_Media_GPU is the fallback if the new env isn't set up yet.
+# ── Step 1: Find a suitable Python ───────────────────────────────────────────
+# Try each candidate in order; pick the first one that exists and has all
+# required packages installed.
+# PY312_SAM3 is preferred (Python 3.12, SAM3, CUDA 12.6).
+# PY310_Media_GPU is the fallback if the new env isn't ready yet.
+
 $Required = @("flask", "fitz", "easyocr", "cv2", "numpy")
 
 $candidates = @(
-    "C:\Users\migri\.conda\envs\PY312_SAM3\pythonw.exe",
-    "C:\Users\migri\.conda\envs\PY310_Media_GPU\pythonw.exe",
+    "$env:USERPROFILE\.conda\envs\PY312_SAM3\pythonw.exe",
+    "$env:USERPROFILE\.conda\envs\PY310_Media_GPU\pythonw.exe",
     "C:\Python314\pythonw.exe",
     (Join-Path (Split-Path (Get-Command python -ErrorAction SilentlyContinue).Source) "pythonw.exe")
 )
 
-$PythonW = $null
+$PythonW  = $null
+$EnvLabel = $null
+
 foreach ($c in $candidates) {
     if (-not ($c -and (Test-Path $c))) { continue }
 
-    # Derive python.exe from pythonw.exe to run the check (pythonw has no stdout)
     $pythonExe = Join-Path (Split-Path $c) "python.exe"
     if (-not (Test-Path $pythonExe)) { $pythonExe = $c }
 
     $checkScript = ($Required | ForEach-Object { "import $_" }) -join "; "
-    $env:KMP_DUPLICATE_LIB_OK = "TRUE"   # suppress duplicate-OpenMP warning on Windows
+    $env:KMP_DUPLICATE_LIB_OK = "TRUE"
     $result = & $pythonExe -c $checkScript 2>&1
     if ($LASTEXITCODE -eq 0) {
-        $PythonW = $c
-        Write-Host "Using: $PythonW" -ForegroundColor Cyan
+        $PythonW  = $c
+        $EnvLabel = Split-Path (Split-Path $c -Parent) -Leaf
+        Write-Host "Using Python: $PythonW" -ForegroundColor Cyan
         break
     } else {
-        Write-Host "Skipping $c (missing packages: $result)" -ForegroundColor Yellow
+        Write-Host "Skipping $c (missing packages)" -ForegroundColor Yellow
     }
 }
 
 if (-not $PythonW) {
     Write-Host ""
-    Write-Host "ERROR: No suitable Python found. Install missing packages with:" -ForegroundColor Red
-    Write-Host "  pip install flask pymupdf easyocr opencv-python-headless" -ForegroundColor Yellow
+    Write-Host "ERROR: No suitable Python found." -ForegroundColor Red
+    Write-Host "Run setup_env.ps1 first, then try again." -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1
 }
 
+# Derive python.exe path for checks below
+$pythonExe = Join-Path (Split-Path $PythonW) "python.exe"
+
+# ── Step 2: Check SAM3 model (only when using the SAM3 env) ──────────────────
+$hasSam3 = & $pythonExe -c "import sam3" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "Checking SAM3 model in HuggingFace cache..." -ForegroundColor DarkGray
+
+    & $pythonExe -c `
+        "from huggingface_hub import try_to_load_from_cache; r=try_to_load_from_cache('facebook/sam3','sam3.pt'); exit(0 if r else 1)" `
+        2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "ERROR: SAM3 model not found in HuggingFace cache." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Download it first by running (in order):" -ForegroundColor Yellow
+        Write-Host "  conda activate PY312_SAM3" -ForegroundColor White
+        Write-Host "  huggingface-cli login" -ForegroundColor DarkGray
+        Write-Host "    (paste your token from https://huggingface.co/settings/tokens)" -ForegroundColor DarkGray
+        Write-Host "  python `"$ProjectDir\download_models.py`"" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Then run create_shortcut.ps1 again." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+
+    Write-Host "SAM3 model: found in cache." -ForegroundColor Green
+} else {
+    Write-Host "Note: sam3 not installed in this env ($EnvLabel) — using CV fallback for figures." -ForegroundColor Yellow
+}
+
+# ── Step 3: Create the shortcut ───────────────────────────────────────────────
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut  = $WshShell.CreateShortcut($ShortcutPath)
 
@@ -72,8 +109,7 @@ $Shortcut.Save()
 Write-Host ""
 Write-Host "Shortcut created: $ShortcutPath" -ForegroundColor Green
 Write-Host ""
-Write-Host "To use: double-click PDF to Text on your Desktop."
-Write-Host "  - First launch starts the Flask server and opens your browser."
+Write-Host "To use: double-click 'PDF to Text' on your Desktop."
+Write-Host "  - First launch loads EasyOCR + SAM3 (30-60 s), then opens the browser."
 Write-Host "  - Double-clicking again while running just reopens the tab."
-Write-Host "  - EasyOCR and SAM3 model weights load on first run (may take a moment)."
-Write-Host "  - If SAM3 checkpoint is missing, run: conda activate PY312_SAM3 && python download_models.py"
+Write-Host "  - Click Stop in the UI to cancel a long conversion without killing the process."
