@@ -56,9 +56,15 @@
 
     <!-- Progress -->
     <div id="progress-section" class="hidden space-y-2">
-      <div class="flex justify-between text-xs text-gray-400">
+      <div class="flex justify-between text-xs text-gray-400 items-center">
         <span id="progress-label">Starting…</span>
-        <span id="progress-count"></span>
+        <div class="flex items-center gap-3">
+          <span id="progress-count"></span>
+          <button id="stop-btn"
+            class="hidden text-xs bg-red-900/60 hover:bg-red-800 text-red-300 border border-red-800 px-2.5 py-0.5 rounded transition">
+            Stop
+          </button>
+        </div>
       </div>
       <div class="w-full bg-gray-800 rounded-full h-2">
         <div id="progress-bar" class="bg-blue-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
@@ -99,6 +105,7 @@
     const fileInfo   = document.getElementById('file-info');
     const fileName   = document.getElementById('file-name');
     const convertBtn = document.getElementById('convert-btn');
+    const stopBtn         = document.getElementById('stop-btn');
     const progressSection = document.getElementById('progress-section');
     const progressBar     = document.getElementById('progress-bar');
     const progressLabel   = document.getElementById('progress-label');
@@ -111,6 +118,7 @@
 
     let selectedFile = null;
     let outputFilename = 'output.txt';
+    let abortCtrl = null;
 
     // --- Drag & drop ---
     dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500', 'bg-gray-900'); });
@@ -137,11 +145,28 @@
       document.title = 'PDF → Text';
     }
 
+    // --- Stop ---
+    stopBtn.addEventListener('click', async () => {
+      if (!abortCtrl) return;
+      stopBtn.disabled = true;
+      stopBtn.textContent = 'Stopping…';
+      try { await fetch('/cancel', { method: 'POST' }); } catch {}
+      abortCtrl.abort();
+    });
+
+    function setConverting(on) {
+      convertBtn.disabled = on;
+      stopBtn.classList.toggle('hidden', !on);
+      stopBtn.disabled = false;
+      stopBtn.textContent = 'Stop';
+    }
+
     // --- Convert ---
     convertBtn.addEventListener('click', async () => {
       if (!selectedFile) return;
 
-      convertBtn.disabled = true;
+      abortCtrl = new AbortController();
+      setConverting(true);
       errorBox.classList.add('hidden');
       progressSection.classList.remove('hidden');
       outputSection.classList.remove('hidden');
@@ -154,7 +179,11 @@
       formData.append('pdf', selectedFile);
 
       try {
-        const response = await fetch('/convert', { method: 'POST', body: formData });
+        const response = await fetch('/convert', {
+          method: 'POST',
+          body: formData,
+          signal: abortCtrl.signal,
+        });
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -175,9 +204,10 @@
           }
         }
       } catch (err) {
-        showError(err.message);
+        if (err.name !== 'AbortError') showError(err.message);
       } finally {
-        convertBtn.disabled = false;
+        setConverting(false);
+        abortCtrl = null;
       }
     });
 
@@ -216,6 +246,12 @@
           progressBar.style.width = '100%';
           progressCount.textContent = '';
           document.title = 'Done! — PDF → Text';
+          break;
+
+        case 'cancelled':
+          progressLabel.textContent = 'Stopped.';
+          progressCount.textContent = '';
+          document.title = 'PDF → Text';
           break;
 
         case 'error':

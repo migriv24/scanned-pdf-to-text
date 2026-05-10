@@ -2,3 +2,7 @@ flask>=3.0
 pymupdf>=1.24
 easyocr>=1.7
 opencv-python-headless>=4.0
+huggingface_hub>=0.25
+psutil>=5.9
+# SAM3 requires Python 3.12 and PyTorch 2.7+cu126 — see README for env setup
+sam3>=0.1

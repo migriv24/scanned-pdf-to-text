@@ -13,10 +13,12 @@ $ShortcutPath = [System.IO.Path]::Combine(
 
 # Find pythonw.exe — try each candidate in order, pick the first one that
 # exists AND has all required packages installed.
-# PY310_Media_GPU is the preferred env: Python 3.10, CUDA-enabled PyTorch, all deps installed.
+# PY312_SAM3 is the preferred env: Python 3.12, PyTorch 2.11+CUDA 12.6, SAM3 + all deps.
+# PY310_Media_GPU is the fallback if the new env isn't set up yet.
 $Required = @("flask", "fitz", "easyocr", "cv2", "numpy")
 
 $candidates = @(
+    "C:\Users\migri\.conda\envs\PY312_SAM3\pythonw.exe",
     "C:\Users\migri\.conda\envs\PY310_Media_GPU\pythonw.exe",
     "C:\Python314\pythonw.exe",
     (Join-Path (Split-Path (Get-Command python -ErrorAction SilentlyContinue).Source) "pythonw.exe")
@@ -73,4 +75,5 @@ Write-Host ""
 Write-Host "To use: double-click PDF to Text on your Desktop."
 Write-Host "  - First launch starts the Flask server and opens your browser."
 Write-Host "  - Double-clicking again while running just reopens the tab."
-Write-Host "  - EasyOCR model weights load on first run (may take a moment)."
+Write-Host "  - EasyOCR and SAM3 model weights load on first run (may take a moment)."
+Write-Host "  - If SAM3 checkpoint is missing, run: conda activate PY312_SAM3 && python download_models.py"
